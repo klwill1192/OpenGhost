@@ -25,7 +25,7 @@ KEY_TO_SEND = "f"
 TARGET_WINDOW_NAME = "asciiquarium-target"
 
 # Debug output
-DEBUG = True
+DEBUG = False
 DEBUG_INTERVAL_SECONDS = 0.5
 
 # Simple status overlay
