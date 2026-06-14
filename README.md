@@ -31,11 +31,64 @@ I'm using the Python library [py5](https://py5coding.org/index.html) to display 
 - Clone this repo
 
 #### If The Camera Is Being Used
+
 - Downgrade numpy to `numpy==1.26.4` (any numpy version less than 2.0)
 - Install dependency `sudo apt install libcap-dev`
 - Install picamera2 using `pip install picamera2`
 - Install libcamera `sudo apt install libcamera-apps python3-libcamera python3-picamera2`
 
+### Feeding Asciiquarium gesture controller
+
+The `pinch-release-keypress` branch includes a Raspberry Pi gesture controller for the Feeding Asciiquarium project.
+
+```text
+https://github.com/klwill1192/asciiquarium-python/tree/feeding-version
+````
+
+The controller script is currently:
+
+```text
+pinch_release_keypress.py
+```
+
+Supported gestures:
+
+```text
+Pinch thumb and index finger, then release     Send F to feed the fish
+Hold a two-finger "peace sign" gesture         Send q to quit the aquarium
+Hold a closed-fist gesture                     Shut down the Raspberry Pi
+```
+
+The target xterm window title is:
+
+```text
+asciiquarium-window
+```
+
+The Tkinter status flag shows the current camera/gesture state:
+
+```text
+Black flag     No hand detected by the camera
+Green flag     Hand detected / normal operation
+Yellow flag    Shutdown gesture has been held for 2 seconds
+Red flag       Shutdown gesture has been held for 4 seconds; shutdown is imminent
+```
+
+Timing:
+
+```text
+Peace sign hold     5 seconds    Quit aquarium
+Closed fist hold    7 seconds    Shut down Raspberry Pi
+```
+
+Debug controls are configured near the top of `pinch_release_keypress.py`:
+
+```python
+DEBUG_MESSAGES = True
+DEBUG_CAPTURE_FRAMES = False
+```
+
+`DEBUG_MESSAGES` prints gesture diagnostics to the terminal. `DEBUG_CAPTURE_FRAMES` saves camera frames for gesture debugging and should normally be left off to avoid filling storage.
 
 ## How To Run Programs
 - Open a terminal and activate the virtual environment
