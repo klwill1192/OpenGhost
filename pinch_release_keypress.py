@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 
+import os
 import subprocess
 import time
 import tkinter as tk
@@ -92,10 +93,27 @@ DEBUG_FRAME_DIR = Path.home() / "openghost_debug_frames"
 
 # Simple status overlay
 # Adjust X and Y until the flag lands on the castle flag position.
-STATUS_WINDOW_X = 510
-STATUS_WINDOW_Y = 430
-STATUS_WINDOW_WIDTH = 40
-STATUS_WINDOW_HEIGHT = 40
+# These defaults match the current 50mm beam-splitter profile.
+# The launcher can override them with environment variables for other
+# display/beam-splitter profiles.
+def env_int(name: str, default: int) -> int:
+    """Return an integer environment override, or the default if unset/invalid."""
+    raw_value = os.environ.get(name)
+    if raw_value is None:
+        return default
+
+    try:
+        return int(raw_value)
+    except ValueError:
+        print(f"WARNING: ignoring invalid {name}={raw_value!r}; using {default}")
+        return default
+
+
+STATUS_WINDOW_X = env_int("STATUS_WINDOW_X", 510)
+STATUS_WINDOW_Y = env_int("STATUS_WINDOW_Y", 430)
+STATUS_WINDOW_WIDTH = env_int("STATUS_WINDOW_WIDTH", 40)
+STATUS_WINDOW_HEIGHT = env_int("STATUS_WINDOW_HEIGHT", 40)
+STATUS_FLAG_FONT_SIZE = env_int("STATUS_FLAG_FONT_SIZE", 24)
 
 NO_HAND_FLAG = "⚐"
 HAND_FLAG = "⚑"
@@ -281,7 +299,7 @@ def create_status_window():
     label = tk.Label(
         root,
         text=NO_HAND_FLAG,
-        font=("DejaVu Sans", 24, "bold"),
+        font=("DejaVu Sans", STATUS_FLAG_FONT_SIZE, "bold"),
         fg=NO_HAND_COLOR,
         bg="black",
         bd=0,
@@ -627,6 +645,12 @@ def main() -> None:
     print(
         "Pi shutdown max thumb/index distance: "
         f"{PI_SHUTDOWN_MAX_THUMB_INDEX_DISTANCE}"
+    )
+    print(
+        "Status flag overlay: "
+        f"x={STATUS_WINDOW_X}, y={STATUS_WINDOW_Y}, "
+        f"width={STATUS_WINDOW_WIDTH}, height={STATUS_WINDOW_HEIGHT}, "
+        f"font_size={STATUS_FLAG_FONT_SIZE}"
     )
     if DEBUG_CAPTURE_FRAMES:
         print(f"Debug frames will be saved in: {DEBUG_FRAME_DIR}")
