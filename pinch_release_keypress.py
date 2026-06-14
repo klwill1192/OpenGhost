@@ -38,13 +38,38 @@ SHUTDOWN_GESTURE_GRACE_SECONDS = 0.75
 # because an open hand appears naturally while feeding.
 # These values are in MediaPipe's normalized hand-coordinate space.
 #
-# MediaPipe can label angled fingers imperfectly, so do not require the V to
-# be specifically index+middle. Treat it as: any two non-thumb fingers are
-# clearly extended and spread apart, while not all four fingers are extended.
+# The peace-sign quit gesture should be deliberate and should not be
+# confused with thumbs-up. Require index+middle specifically, because
+# thumbs-up can make ring/pinky look extended to MediaPipe.
 SHUTDOWN_MIN_EXTENDED_FINGERS = 2
 SHUTDOWN_MAX_EXTENDED_FINGERS = 3
 SHUTDOWN_EXTENDED_FINGER_RATIO = 1.25
 SHUTDOWN_MIN_V_SPREAD = 0.10
+
+# Raspberry Pi shutdown gesture tuning.
+# Hold a closed fist in view:
+# - 0-2 seconds: normal green hand-found flag
+# - 2-4 seconds: solid yellow warning flag
+# - 4-8 seconds: solid red imminent-shutdown flag
+# - 8 seconds: quit the aquarium, then shut down the Raspberry Pi
+PI_SHUTDOWN_YELLOW_SECONDS = 2.0
+PI_SHUTDOWN_RED_SECONDS = 4.0
+PI_SHUTDOWN_TRIGGER_SECONDS = 7.0
+PI_SHUTDOWN_MAX_EXTENDED_FINGERS = 1
+# Reject thumbs-up so that gesture remains available for a future action.
+# A thumb is considered extended when the thumb tip is far from the index
+# finger MCP joint relative to the hand's MCP-to-MCP palm width.
+PI_SHUTDOWN_REJECT_THUMB_EXTENDED = True
+# Thumbs-up was still being accepted with a loose 1.25 ratio.
+# Lower this ratio and add a wrist-based thumb check below so an extended
+# thumb is rejected more reliably while a folded thumb can still be accepted
+# as a closed fist.
+PI_SHUTDOWN_THUMB_EXTENDED_RATIO = 0.85
+# A real closed fist in testing had thumb/index distance around 0.14-0.15.
+# Thumbs-up should normally move the thumb farther away, so reject only when
+# the thumb/index distance is clearly larger than a closed-fist value.
+PI_SHUTDOWN_MAX_THUMB_INDEX_DISTANCE = 0.22
+PI_SHUTDOWN_THUMB_WRIST_RATIO = 1.20
 
 # Keypress target
 KEY_TO_SEND = "f"
@@ -149,8 +174,12 @@ def find_target_windows() -> list[str]:
     return window_ids
 
 
-def send_key_to_target(key: str, label: str) -> bool:
-    """Send a key to the target xterm window using xdotool."""
+def send_key_to_target(key: str, label: str, also_send_to_focused_window: bool = False) -> bool:
+    """Send a key to the target xterm window using xdotool.
+
+    Feed should send exactly one targeted key event. Quit uses the optional
+    focused-window key event as an extra reliability measure.
+    """
     print(f"Sending {label} key")
 
     sent = False
@@ -159,8 +188,7 @@ def send_key_to_target(key: str, label: str) -> bool:
         debug_print(f"Sending {label} to window {window_id}")
 
         # Activating first is more reliable for terminal applications than
-        # relying only on xdotool's --window argument.  Then send both a
-        # targeted key event and a focused-window key event.
+        # relying only on xdotool's --window argument.
         subprocess.run(
             ["xdotool", "windowactivate", "--sync", window_id],
             check=False,
@@ -171,11 +199,12 @@ def send_key_to_target(key: str, label: str) -> bool:
             check=False,
             timeout=2,
         )
-        subprocess.run(
-            ["xdotool", "key", "--clearmodifiers", key],
-            check=False,
-            timeout=2,
-        )
+        if also_send_to_focused_window:
+            subprocess.run(
+                ["xdotool", "key", "--clearmodifiers", key],
+                check=False,
+                timeout=2,
+            )
         sent = True
 
     return sent
@@ -203,14 +232,39 @@ def close_target_windows_after_quit_grace(grace_seconds: float = 1.0) -> None:
 
 
 def send_keypress() -> None:
-    """Send the configured feed key to the target xterm window."""
+    """Send one feed key to the target xterm window."""
     send_key_to_target(KEY_TO_SEND, KEY_TO_SEND.upper())
 
 
 def send_quit_keypress() -> None:
     """Send q to the aquarium, then close the xterm if q did not exit it."""
-    if send_key_to_target(QUIT_KEY_TO_SEND, QUIT_KEY_TO_SEND.upper()):
+    if send_key_to_target(
+        QUIT_KEY_TO_SEND,
+        QUIT_KEY_TO_SEND.upper(),
+        also_send_to_focused_window=True,
+    ):
         close_target_windows_after_quit_grace()
+
+
+def shutdown_raspberry_pi() -> bool:
+    """Request a Raspberry Pi OS shutdown without waiting on this process.
+
+    Start the shutdown command in its own session before we quit the aquarium.
+    That way, if the launcher notices the aquarium xterm closing and stops this
+    OpenGhost process, the OS shutdown request has already been handed to sudo.
+    """
+    print("Requesting Raspberry Pi shutdown with sudo -n /usr/sbin/shutdown -h now")
+    try:
+        subprocess.Popen(
+            ["sudo", "-n", "/usr/sbin/shutdown", "-h", "now"],
+            start_new_session=True,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+        return True
+    except Exception as exc:
+        print(f"WARNING: failed to request Raspberry Pi shutdown: {exc}")
+        return False
 
 
 def create_status_window():
@@ -282,11 +336,14 @@ def evaluate_shutdown_gesture(hand_landmarks):
 
     Shutdown gesture rules:
     - use a deliberate two-finger V / peace-out gesture;
-    - accept any two non-thumb fingers as the V, because MediaPipe can label
-      angled fingers imperfectly;
-    - require the two extended fingertips to be spread apart;
+    - require index and middle fingers specifically;
+    - require the index and middle fingertips to be spread apart;
     - reject a full open palm by requiring that not all four fingers are
       counted as extended.
+
+    Earlier versions accepted any two extended non-thumb fingers. That worked
+    for some angled peace signs, but it also let thumbs-up trigger aquarium
+    quit when MediaPipe interpreted ring/pinky as extended.
     """
     ratios = {
         "index": finger_extension_ratio(
@@ -349,9 +406,18 @@ def evaluate_shutdown_gesture(hand_landmarks):
 
     enough_extended = extended_count >= SHUTDOWN_MIN_EXTENDED_FINGERS
     not_open_palm = extended_count <= SHUTDOWN_MAX_EXTENDED_FINGERS
-    spread_ok = best_pair_spread >= SHUTDOWN_MIN_V_SPREAD
 
-    shutdown_gesture = enough_extended and not_open_palm and spread_ok
+    index_extended = "index" in extended_fingers
+    middle_extended = "middle" in extended_fingers
+    index_middle_spread = landmark_distance(
+        hand_landmarks,
+        HandLandmark.INDEX_FINGER_TIP,
+        HandLandmark.MIDDLE_FINGER_TIP,
+    )
+    spread_ok = index_middle_spread >= SHUTDOWN_MIN_V_SPREAD
+    index_middle_ok = index_extended and middle_extended
+
+    shutdown_gesture = index_middle_ok and not_open_palm and spread_ok
 
     details = {
         "ratios": ratios,
@@ -360,11 +426,125 @@ def evaluate_shutdown_gesture(hand_landmarks):
         "extended_count": extended_count,
         "best_pair": best_pair,
         "best_pair_spread": best_pair_spread,
+        "index_middle_spread": index_middle_spread,
         "enough_extended": enough_extended,
+        "index_extended": index_extended,
+        "middle_extended": middle_extended,
+        "index_middle_ok": index_middle_ok,
         "not_open_palm": not_open_palm,
         "spread_ok": spread_ok,
     }
     return shutdown_gesture, details
+
+
+def evaluate_pi_shutdown_gesture(hand_landmarks, gesture_details):
+    """Return Raspberry Pi shutdown-gesture decision plus debug data.
+
+    Raspberry Pi shutdown gesture rules:
+    - use a deliberately held closed fist;
+    - count the same non-thumb finger-extension ratios used for the peace sign;
+    - treat the hand as a fist when no more than one non-thumb finger appears
+      extended.
+
+    The long 8-second hold requirement is the main safety guard.
+    """
+    extended_count = gesture_details["extended_count"]
+    extended_fingers = gesture_details["extended_fingers"]
+    ratios = gesture_details["ratios"]
+    thumb_index_distance = gesture_details["thumb_index_distance"]
+
+    palm_width = landmark_distance(
+        hand_landmarks,
+        HandLandmark.INDEX_FINGER_MCP,
+        HandLandmark.PINKY_MCP,
+    )
+    thumb_tip_to_index_mcp = landmark_distance(
+        hand_landmarks,
+        HandLandmark.THUMB_TIP,
+        HandLandmark.INDEX_FINGER_MCP,
+    )
+    wrist_to_thumb_tip = landmark_distance(
+        hand_landmarks,
+        HandLandmark.WRIST,
+        HandLandmark.THUMB_TIP,
+    )
+    wrist_to_thumb_mcp = landmark_distance(
+        hand_landmarks,
+        HandLandmark.WRIST,
+        HandLandmark.THUMB_MCP,
+    )
+
+    if palm_width <= 0.0001:
+        thumb_extension_ratio = 0.0
+    else:
+        thumb_extension_ratio = thumb_tip_to_index_mcp / palm_width
+
+    if wrist_to_thumb_mcp <= 0.0001:
+        thumb_wrist_ratio = 0.0
+    else:
+        thumb_wrist_ratio = wrist_to_thumb_tip / wrist_to_thumb_mcp
+
+    thumb_extended_by_index = (
+        thumb_extension_ratio >= PI_SHUTDOWN_THUMB_EXTENDED_RATIO
+    )
+    # Keep the wrist ratio only as a diagnostic. It was too aggressive as a
+    # rejection test because a real closed fist can still put the thumb tip
+    # farther from the wrist than the thumb MCP.
+    thumb_extended_by_wrist = False
+    thumb_too_far_from_index = (
+        thumb_index_distance > PI_SHUTDOWN_MAX_THUMB_INDEX_DISTANCE
+    )
+    thumb_extended = thumb_extended_by_index or thumb_too_far_from_index
+
+    few_non_thumb_fingers_extended = (
+        extended_count <= PI_SHUTDOWN_MAX_EXTENDED_FINGERS
+    )
+    thumb_ok = (not PI_SHUTDOWN_REJECT_THUMB_EXTENDED) or (not thumb_extended)
+    closed_fist = few_non_thumb_fingers_extended and thumb_ok
+
+    details = {
+        "ratios": ratios,
+        "extended_fingers": extended_fingers,
+        "extended_count": extended_count,
+        "palm_width": palm_width,
+        "thumb_tip_to_index_mcp": thumb_tip_to_index_mcp,
+        "wrist_to_thumb_tip": wrist_to_thumb_tip,
+        "wrist_to_thumb_mcp": wrist_to_thumb_mcp,
+        "thumb_index_distance": thumb_index_distance,
+        "thumb_extension_ratio": thumb_extension_ratio,
+        "thumb_wrist_ratio": thumb_wrist_ratio,
+        "thumb_extended_by_index": thumb_extended_by_index,
+        "thumb_extended_by_wrist": thumb_extended_by_wrist,
+        "thumb_too_far_from_index": thumb_too_far_from_index,
+        "thumb_extended": thumb_extended,
+        "few_non_thumb_fingers_extended": few_non_thumb_fingers_extended,
+        "thumb_ok": thumb_ok,
+        "closed_fist": closed_fist,
+    }
+    return closed_fist, details
+
+
+def format_pi_shutdown_debug(details) -> str:
+    """Format Raspberry Pi shutdown-gesture measurements."""
+    ratios = details["ratios"]
+    extended_text = ",".join(details["extended_fingers"]) or "none"
+    return (
+        f"fist_extended={details['extended_count']}/4 [{extended_text}], "
+        f"index_ratio={ratios['index']:.2f}, "
+        f"middle_ratio={ratios['middle']:.2f}, "
+        f"ring_ratio={ratios['ring']:.2f}, "
+        f"pinky_ratio={ratios['pinky']:.2f}, "
+        f"thumb_index={details['thumb_index_distance']:.3f}, "
+        f"thumb_ratio={details['thumb_extension_ratio']:.2f}, "
+        f"thumb_wrist_ratio={details['thumb_wrist_ratio']:.2f}, "
+        f"thumb_ext_index:{details['thumb_extended_by_index']}, "
+        f"thumb_too_far:{details['thumb_too_far_from_index']}, "
+        f"thumb_extended:{details['thumb_extended']}, "
+        f"few_fingers:{details['few_non_thumb_fingers_extended']}, "
+        f"thumb_ok:{details['thumb_ok']}, "
+        f"closed_fist:{details['closed_fist']}"
+    )
+
 
 def format_shutdown_debug(details) -> str:
     """Format shutdown-gesture measurements for concise debug output."""
@@ -377,11 +557,14 @@ def format_shutdown_debug(details) -> str:
         f"extended={details['extended_count']}/4 [{extended_text}], "
         f"best_pair={best_pair_text}, "
         f"v_spread={details['best_pair_spread']:.3f}, "
+        f"index_middle_spread={details.get('index_middle_spread', 0.0):.3f}, "
         f"index_ratio={ratios['index']:.2f}, "
         f"middle_ratio={ratios['middle']:.2f}, "
         f"ring_ratio={ratios['ring']:.2f}, "
         f"pinky_ratio={ratios['pinky']:.2f}, "
-        f"checks=enough:{details['enough_extended']} "
+        f"checks=index:{details.get('index_extended', False)} "
+        f"middle:{details.get('middle_extended', False)} "
+        f"index_middle:{details.get('index_middle_ok', False)} "
         f"not_open_palm:{details['not_open_palm']} "
         f"spread:{details['spread_ok']}"
     )
@@ -396,6 +579,11 @@ def main() -> None:
     shutdown_last_seen_time = None
     shutdown_status = "none"
     shutdown_gesture_frame_active = False
+
+    pi_shutdown_hold_start_time = None
+    pi_shutdown_last_seen_time = None
+    pi_shutdown_status = "none"
+    pi_shutdown_gesture_frame_active = False
 
     hand_found_start_time = None
     hand_found_snapshot_saved = False
@@ -430,6 +618,16 @@ def main() -> None:
     print(f"Shutdown maximum extended fingers: {SHUTDOWN_MAX_EXTENDED_FINGERS}")
     print(f"Shutdown extended-finger ratio: {SHUTDOWN_EXTENDED_FINGER_RATIO}")
     print(f"Shutdown minimum V spread: {SHUTDOWN_MIN_V_SPREAD}")
+    print(f"Pi shutdown yellow threshold: {PI_SHUTDOWN_YELLOW_SECONDS}")
+    print(f"Pi shutdown red threshold: {PI_SHUTDOWN_RED_SECONDS}")
+    print(f"Pi shutdown trigger threshold: {PI_SHUTDOWN_TRIGGER_SECONDS}")
+    print(f"Pi shutdown max extended fingers: {PI_SHUTDOWN_MAX_EXTENDED_FINGERS}")
+    print(f"Pi shutdown reject thumb extended: {PI_SHUTDOWN_REJECT_THUMB_EXTENDED}")
+    print(f"Pi shutdown thumb extended ratio: {PI_SHUTDOWN_THUMB_EXTENDED_RATIO}")
+    print(
+        "Pi shutdown max thumb/index distance: "
+        f"{PI_SHUTDOWN_MAX_THUMB_INDEX_DISTANCE}"
+    )
     if DEBUG_CAPTURE_FRAMES:
         print(f"Debug frames will be saved in: {DEBUG_FRAME_DIR}")
         print(
@@ -438,6 +636,7 @@ def main() -> None:
         )
     print("Pinch thumb/index finger, then release, to send F.")
     print("Hold a two-finger V / peace-out gesture for 5 seconds to quit the aquarium.")
+    print("Hold a closed fist for 8 seconds to shut down the Raspberry Pi.")
     print("Press Ctrl+C to stop.")
 
     try:
@@ -461,6 +660,10 @@ def main() -> None:
                 hand_landmarks = result.multi_hand_landmarks[0]
                 shutdown_gesture, gesture_details = evaluate_shutdown_gesture(hand_landmarks)
                 gesture_debug = format_shutdown_debug(gesture_details)
+                pi_shutdown_gesture, pi_gesture_details = evaluate_pi_shutdown_gesture(
+                    hand_landmarks, gesture_details
+                )
+                pi_gesture_debug = format_pi_shutdown_debug(pi_gesture_details)
 
                 if hand_found_start_time is None:
                     hand_found_start_time = now
@@ -498,7 +701,92 @@ def main() -> None:
                     )
                     shutdown_gesture_frame_active = False
 
-                if shutdown_gesture:
+                if pi_shutdown_gesture and not pi_shutdown_gesture_frame_active:
+                    save_debug_frame(
+                        rgb_frame,
+                        "pi_shutdown_gesture_detected",
+                        pi_gesture_debug,
+                        hand_landmarks,
+                    )
+                    pi_shutdown_gesture_frame_active = True
+                elif not pi_shutdown_gesture and pi_shutdown_gesture_frame_active:
+                    save_debug_frame(
+                        rgb_frame,
+                        "pi_shutdown_gesture_lost",
+                        pi_gesture_debug,
+                        hand_landmarks,
+                    )
+                    pi_shutdown_gesture_frame_active = False
+
+                if pi_shutdown_gesture:
+                    pi_shutdown_last_seen_time = now
+
+                    if pi_shutdown_hold_start_time is None:
+                        pi_shutdown_hold_start_time = now
+                        pi_shutdown_status = "lime"
+                        debug_print(
+                            "pi shutdown gesture started: "
+                            f"closed fist detected ({pi_gesture_debug})"
+                        )
+
+                    pi_shutdown_hold_time = now - pi_shutdown_hold_start_time
+
+                    if pi_shutdown_hold_time >= PI_SHUTDOWN_TRIGGER_SECONDS:
+                        set_status_flag(status_root, status_label, SHUTDOWN_RED_COLOR)
+                        debug_print(
+                            "pi shutdown gesture triggered: "
+                            f"closed fist held {pi_shutdown_hold_time:.2f}s"
+                        )
+                        # Request OS shutdown before quitting the aquarium.
+                        # Quitting the aquarium can cause the launcher to stop
+                        # this OpenGhost process immediately, so the OS shutdown
+                        # request must be started first.
+                        shutdown_raspberry_pi()
+                        send_quit_keypress()
+                        break
+
+                    if pi_shutdown_hold_time >= PI_SHUTDOWN_RED_SECONDS:
+                        set_status_flag(status_root, status_label, SHUTDOWN_RED_COLOR)
+                        new_pi_shutdown_status = "red"
+                    elif pi_shutdown_hold_time >= PI_SHUTDOWN_YELLOW_SECONDS:
+                        set_status_flag(status_root, status_label, SHUTDOWN_YELLOW_COLOR)
+                        new_pi_shutdown_status = "yellow"
+                    else:
+                        set_status_flag(status_root, status_label, HAND_FOUND_COLOR)
+                        new_pi_shutdown_status = "lime"
+
+                    if new_pi_shutdown_status != pi_shutdown_status:
+                        debug_print(
+                            "pi shutdown status changed: "
+                            f"{pi_shutdown_status} -> {new_pi_shutdown_status} "
+                            f"after {pi_shutdown_hold_time:.2f}s"
+                        )
+                        pi_shutdown_status = new_pi_shutdown_status
+
+                    # While the Pi shutdown gesture is active, do not also treat
+                    # the hand as a peace-sign aquarium-quit gesture.
+                    shutdown_hold_start_time = None
+                    shutdown_last_seen_time = None
+                    shutdown_status = "none"
+
+                elif pi_shutdown_hold_start_time is not None:
+                    # A Raspberry Pi OS shutdown is a high-impact action.
+                    # Do not keep counting through a visible non-fist hand shape,
+                    # such as thumbs-up.  Grace is only allowed in the no-hand
+                    # branch below, where MediaPipe may have briefly lost the hand.
+                    pi_shutdown_hold_time = now - pi_shutdown_hold_start_time
+                    debug_print(
+                        "pi shutdown gesture cancelled: "
+                        f"visible hand is no longer a closed fist "
+                        f"after {pi_shutdown_hold_time:.2f}s "
+                        f"({pi_gesture_debug})"
+                    )
+                    pi_shutdown_hold_start_time = None
+                    pi_shutdown_last_seen_time = None
+                    pi_shutdown_status = "none"
+                    set_status_flag(status_root, status_label, HAND_FOUND_COLOR)
+
+                elif shutdown_gesture:
                     shutdown_last_seen_time = now
 
                     if shutdown_hold_start_time is None:
@@ -583,7 +871,10 @@ def main() -> None:
 
                 thumb_dist = gesture_details["thumb_index_distance"]
 
-                shutdown_is_active = shutdown_hold_start_time is not None
+                shutdown_is_active = (
+                    shutdown_hold_start_time is not None
+                    or pi_shutdown_hold_start_time is not None
+                )
 
                 if shutdown_is_active:
                     gesture_state = "shutdown-hold"
@@ -635,8 +926,11 @@ def main() -> None:
                         f"pinch_was_active={pinch_was_active}, "
                         f"shutdown_gesture={shutdown_gesture}, "
                         f"{gesture_debug}, "
+                        f"pi_shutdown_gesture={pi_shutdown_gesture}, "
+                        f"{pi_gesture_debug}, "
                         f"shutdown_hold={shutdown_hold_time:.2f}, "
-                        f"shutdown_status={shutdown_status}"
+                        f"shutdown_status={shutdown_status}, "
+                        f"pi_shutdown_status={pi_shutdown_status}"
                     )
                     last_debug_time = now
 
@@ -650,7 +944,43 @@ def main() -> None:
                     save_debug_frame(rgb_frame, "shutdown_gesture_lost", "no hand landmarks")
                     shutdown_gesture_frame_active = False
 
-                if shutdown_hold_start_time is not None:
+                if pi_shutdown_hold_start_time is not None:
+                    pi_shutdown_gap_time = (
+                        999.0
+                        if pi_shutdown_last_seen_time is None
+                        else now - pi_shutdown_last_seen_time
+                    )
+
+                    if pi_shutdown_gap_time <= SHUTDOWN_GESTURE_GRACE_SECONDS:
+                        pi_shutdown_hold_time = now - pi_shutdown_hold_start_time
+                        if pi_shutdown_hold_time >= PI_SHUTDOWN_RED_SECONDS:
+                            set_status_flag(status_root, status_label, SHUTDOWN_RED_COLOR)
+                        elif pi_shutdown_hold_time >= PI_SHUTDOWN_YELLOW_SECONDS:
+                            set_status_flag(status_root, status_label, SHUTDOWN_YELLOW_COLOR)
+                        else:
+                            set_status_flag(status_root, status_label, HAND_FOUND_COLOR)
+
+                        if DEBUG_MESSAGES and now - last_debug_time >= DEBUG_INTERVAL_SECONDS:
+                            print(
+                                "no hand detected, but pi shutdown grace is active: "
+                                f"gap={pi_shutdown_gap_time:.2f}s, "
+                                f"pi_shutdown_hold={pi_shutdown_hold_time:.2f}s, "
+                                f"pi_shutdown_status={pi_shutdown_status}"
+                            )
+                            last_debug_time = now
+                    else:
+                        pi_shutdown_hold_time = now - pi_shutdown_hold_start_time
+                        debug_print(
+                            "pi shutdown gesture cancelled: "
+                            f"hand lost for {pi_shutdown_gap_time:.2f}s "
+                            f"after {pi_shutdown_hold_time:.2f}s"
+                        )
+                        pi_shutdown_hold_start_time = None
+                        pi_shutdown_last_seen_time = None
+                        pi_shutdown_status = "none"
+                        set_status_flag(status_root, status_label, "black")
+
+                elif shutdown_hold_start_time is not None:
                     shutdown_gap_time = (
                         999.0
                         if shutdown_last_seen_time is None
