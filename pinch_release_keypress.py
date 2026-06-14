@@ -75,7 +75,7 @@ STATUS_WINDOW_HEIGHT = 40
 NO_HAND_FLAG = "⚐"
 HAND_FLAG = "⚑"
 
-NO_HAND_COLOR = "lime"
+NO_HAND_COLOR = "white"
 HAND_FOUND_COLOR = "lime"
 SHUTDOWN_YELLOW_COLOR = "yellow"
 SHUTDOWN_RED_COLOR = "red"
@@ -242,12 +242,12 @@ def create_status_window():
     return root, label
 
 
-def set_status_flag(root, label, hand_detected: bool, color: str | None = None) -> None:
+def set_status_flag(root, label, flag_color: str) -> None:
     """Update the overlay flag."""
-    if hand_detected:
-        label.config(text=HAND_FLAG, fg=color or HAND_FOUND_COLOR)
+    if flag_color == "black":
+        label.config(text=NO_HAND_FLAG, fg=NO_HAND_COLOR)
     else:
-        label.config(text=NO_HAND_FLAG, fg=color or NO_HAND_COLOR)
+        label.config(text=HAND_FLAG, fg=flag_color)
 
     root.update_idletasks()
     root.update()
@@ -512,7 +512,7 @@ def main() -> None:
                     shutdown_hold_time = now - shutdown_hold_start_time
 
                     if shutdown_hold_time >= SHUTDOWN_TRIGGER_SECONDS:
-                        set_status_flag(status_root, status_label, True, SHUTDOWN_RED_COLOR)
+                        set_status_flag(status_root, status_label, SHUTDOWN_RED_COLOR)
                         debug_print(
                             "shutdown gesture triggered: "
                             f"peace-out gesture held {shutdown_hold_time:.2f}s"
@@ -521,13 +521,13 @@ def main() -> None:
                         break
 
                     if shutdown_hold_time >= SHUTDOWN_RED_SECONDS:
-                        set_status_flag(status_root, status_label, True, SHUTDOWN_RED_COLOR)
+                        set_status_flag(status_root, status_label, SHUTDOWN_RED_COLOR)
                         new_shutdown_status = "red"
                     elif shutdown_hold_time >= SHUTDOWN_YELLOW_SECONDS:
-                        set_status_flag(status_root, status_label, True, SHUTDOWN_YELLOW_COLOR)
+                        set_status_flag(status_root, status_label, SHUTDOWN_YELLOW_COLOR)
                         new_shutdown_status = "yellow"
                     else:
-                        set_status_flag(status_root, status_label, True, HAND_FOUND_COLOR)
+                        set_status_flag(status_root, status_label, HAND_FOUND_COLOR)
                         new_shutdown_status = "lime"
 
                     if new_shutdown_status != shutdown_status:
@@ -550,15 +550,15 @@ def main() -> None:
                             shutdown_hold_time = now - shutdown_hold_start_time
                             if shutdown_hold_time >= SHUTDOWN_RED_SECONDS:
                                 set_status_flag(
-                                    status_root, status_label, True, SHUTDOWN_RED_COLOR
+                                    status_root, status_label, SHUTDOWN_RED_COLOR
                                 )
                             elif shutdown_hold_time >= SHUTDOWN_YELLOW_SECONDS:
                                 set_status_flag(
-                                    status_root, status_label, True, SHUTDOWN_YELLOW_COLOR
+                                    status_root, status_label, SHUTDOWN_YELLOW_COLOR
                                 )
                             else:
                                 set_status_flag(
-                                    status_root, status_label, True, HAND_FOUND_COLOR
+                                    status_root, status_label, HAND_FOUND_COLOR
                                 )
 
                             debug_print(
@@ -577,9 +577,9 @@ def main() -> None:
                             shutdown_hold_start_time = None
                             shutdown_last_seen_time = None
                             shutdown_status = "none"
-                            set_status_flag(status_root, status_label, True, HAND_FOUND_COLOR)
+                            set_status_flag(status_root, status_label, HAND_FOUND_COLOR)
                     else:
-                        set_status_flag(status_root, status_label, True, HAND_FOUND_COLOR)
+                        set_status_flag(status_root, status_label, HAND_FOUND_COLOR)
 
                 thumb_dist = gesture_details["thumb_index_distance"]
 
@@ -660,11 +660,11 @@ def main() -> None:
                     if shutdown_gap_time <= SHUTDOWN_GESTURE_GRACE_SECONDS:
                         shutdown_hold_time = now - shutdown_hold_start_time
                         if shutdown_hold_time >= SHUTDOWN_RED_SECONDS:
-                            set_status_flag(status_root, status_label, True, SHUTDOWN_RED_COLOR)
+                            set_status_flag(status_root, status_label, SHUTDOWN_RED_COLOR)
                         elif shutdown_hold_time >= SHUTDOWN_YELLOW_SECONDS:
-                            set_status_flag(status_root, status_label, True, SHUTDOWN_YELLOW_COLOR)
+                            set_status_flag(status_root, status_label, SHUTDOWN_YELLOW_COLOR)
                         else:
-                            set_status_flag(status_root, status_label, True, HAND_FOUND_COLOR)
+                            set_status_flag(status_root, status_label, HAND_FOUND_COLOR)
 
                         if DEBUG_MESSAGES and now - last_debug_time >= DEBUG_INTERVAL_SECONDS:
                             print(
@@ -684,9 +684,9 @@ def main() -> None:
                         shutdown_hold_start_time = None
                         shutdown_last_seen_time = None
                         shutdown_status = "none"
-                        set_status_flag(status_root, status_label, False)
+                        set_status_flag(status_root, status_label, "black")
                 else:
-                    set_status_flag(status_root, status_label, False)
+                    set_status_flag(status_root, status_label, "black")
 
                     if DEBUG_MESSAGES and now - last_debug_time >= DEBUG_INTERVAL_SECONDS:
                         print("no hand detected")
