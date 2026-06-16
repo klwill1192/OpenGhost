@@ -72,9 +72,19 @@ PI_SHUTDOWN_THUMB_EXTENDED_RATIO = 0.85
 PI_SHUTDOWN_MAX_THUMB_INDEX_DISTANCE = 0.22
 PI_SHUTDOWN_THUMB_WRIST_RATIO = 1.20
 
+# Happy Fish gesture tuning.
+# Hold a thumbs-up gesture briefly to send H to the aquarium.
+HAPPY_FISH_HOLD_SECONDS = 2.0
+HAPPY_FISH_GESTURE_GRACE_SECONDS = 0.50
+HAPPY_FISH_STATUS_SECONDS = 8.0
+HAPPY_FISH_THUMB_EXTENDED_RATIO = 0.85
+HAPPY_FISH_MIN_THUMB_WRIST_RATIO = 1.15
+HAPPY_FISH_MAX_EXTENDED_FINGERS = 2
+
 # Keypress target
 KEY_TO_SEND = "f"
 QUIT_KEY_TO_SEND = "q"
+HAPPY_KEY_TO_SEND = "h"
 TARGET_WINDOW_NAME = "asciiquarium-window"
 
 # Debug output
@@ -122,6 +132,8 @@ NO_HAND_COLOR = "white"
 HAND_FOUND_COLOR = "lime"
 SHUTDOWN_YELLOW_COLOR = "yellow"
 SHUTDOWN_RED_COLOR = "red"
+HAPPY_FISH_COLOR = "magenta"
+HAPPY_FISH_STATUS_UNTIL = 0.0
 
 
 HandLandmark = mp.solutions.hands.HandLandmark
@@ -254,6 +266,11 @@ def send_keypress() -> None:
     send_key_to_target(KEY_TO_SEND, KEY_TO_SEND.upper())
 
 
+def send_happy_fish_keypress() -> None:
+    """Send H to the target xterm window to start Happy Fish mode."""
+    send_key_to_target(HAPPY_KEY_TO_SEND, HAPPY_KEY_TO_SEND.upper())
+
+
 def send_quit_keypress() -> None:
     """Send q to the aquarium, then close the xterm if q did not exit it."""
     if send_key_to_target(
@@ -315,7 +332,19 @@ def create_status_window():
 
 
 def set_status_flag(root, label, flag_color: str) -> None:
-    """Update the overlay flag."""
+    """Update the overlay flag.
+
+    Happy Fish mode is a timed status that should survive brief hand loss.
+    Let yellow/red shutdown warnings override it, but prevent normal green
+    or black/no-hand updates from overwriting magenta while the Happy Fish
+    status timer is active.
+    """
+    if (
+        time.time() < HAPPY_FISH_STATUS_UNTIL
+        and flag_color not in (SHUTDOWN_YELLOW_COLOR, SHUTDOWN_RED_COLOR)
+    ):
+        flag_color = HAPPY_FISH_COLOR
+
     if flag_color == "black":
         label.config(text=NO_HAND_FLAG, fg=NO_HAND_COLOR)
     else:
@@ -542,6 +571,104 @@ def evaluate_pi_shutdown_gesture(hand_landmarks, gesture_details):
     return closed_fist, details
 
 
+def evaluate_thumbs_up_gesture(hand_landmarks, gesture_details):
+    """Return thumbs-up gesture decision plus debug data.
+
+    A thumbs-up should have the thumb extended while the non-thumb
+    fingers are mostly curled. This keeps it separate from the
+    peace-sign quit gesture and the closed-fist Pi shutdown gesture.
+    """
+    extended_count = gesture_details["extended_count"]
+    extended_fingers = gesture_details["extended_fingers"]
+    ratios = gesture_details["ratios"]
+    thumb_index_distance = gesture_details["thumb_index_distance"]
+    palm_width = landmark_distance(
+        hand_landmarks,
+        HandLandmark.INDEX_FINGER_MCP,
+        HandLandmark.PINKY_MCP,
+    )
+    thumb_tip_to_index_mcp = landmark_distance(
+        hand_landmarks,
+        HandLandmark.THUMB_TIP,
+        HandLandmark.INDEX_FINGER_MCP,
+    )
+    wrist_to_thumb_tip = landmark_distance(
+        hand_landmarks,
+        HandLandmark.WRIST,
+        HandLandmark.THUMB_TIP,
+    )
+    wrist_to_thumb_mcp = landmark_distance(
+        hand_landmarks,
+        HandLandmark.WRIST,
+        HandLandmark.THUMB_MCP,
+    )
+    if palm_width <= 0.0001:
+        thumb_extension_ratio = 0.0
+    else:
+        thumb_extension_ratio = thumb_tip_to_index_mcp / palm_width
+    if wrist_to_thumb_mcp <= 0.0001:
+        thumb_wrist_ratio = 0.0
+    else:
+        thumb_wrist_ratio = wrist_to_thumb_tip / wrist_to_thumb_mcp
+    thumb_extended = (
+        thumb_extension_ratio >= HAPPY_FISH_THUMB_EXTENDED_RATIO
+        or thumb_wrist_ratio >= HAPPY_FISH_MIN_THUMB_WRIST_RATIO
+    )
+    few_non_thumb_fingers_extended = (
+        extended_count <= HAPPY_FISH_MAX_EXTENDED_FINGERS
+    )
+    index_extended = "index" in extended_fingers
+    middle_extended = "middle" in extended_fingers
+    peace_like = index_extended and middle_extended
+
+    thumbs_up = (
+        thumb_extended
+        and few_non_thumb_fingers_extended
+        and not peace_like
+    )
+    details = {
+        "ratios": ratios,
+        "extended_fingers": extended_fingers,
+        "extended_count": extended_count,
+        "thumb_index_distance": thumb_index_distance,
+        "palm_width": palm_width,
+        "thumb_tip_to_index_mcp": thumb_tip_to_index_mcp,
+        "wrist_to_thumb_tip": wrist_to_thumb_tip,
+        "wrist_to_thumb_mcp": wrist_to_thumb_mcp,
+        "thumb_extension_ratio": thumb_extension_ratio,
+        "thumb_wrist_ratio": thumb_wrist_ratio,
+        "thumb_extended": thumb_extended,
+        "few_non_thumb_fingers_extended": few_non_thumb_fingers_extended,
+        "index_extended": index_extended,
+        "middle_extended": middle_extended,
+        "peace_like": peace_like,
+        "thumbs_up": thumbs_up,
+    }
+    return thumbs_up, details
+
+
+def format_thumbs_up_debug(details) -> str:
+    """Format thumbs-up gesture measurements."""
+    ratios = details["ratios"]
+    extended_text = ",".join(details["extended_fingers"]) or "none"
+    return (
+        f"thumbs_extended={details['extended_count']}/4 [{extended_text}], "
+        f"index_ratio={ratios['index']:.2f}, "
+        f"middle_ratio={ratios['middle']:.2f}, "
+        f"ring_ratio={ratios['ring']:.2f}, "
+        f"pinky_ratio={ratios['pinky']:.2f}, "
+        f"thumb_index={details['thumb_index_distance']:.3f}, "
+        f"thumb_ratio={details['thumb_extension_ratio']:.2f}, "
+        f"thumb_wrist_ratio={details['thumb_wrist_ratio']:.2f}, "
+        f"thumb_extended:{details['thumb_extended']}, "
+        f"few_fingers:{details['few_non_thumb_fingers_extended']}, "
+        f"index_extended:{details['index_extended']}, "
+        f"middle_extended:{details['middle_extended']}, "
+        f"peace_like:{details['peace_like']}, "
+        f"thumbs_up:{details['thumbs_up']}"
+    )
+
+
 def format_pi_shutdown_debug(details) -> str:
     """Format Raspberry Pi shutdown-gesture measurements."""
     ratios = details["ratios"]
@@ -588,6 +715,8 @@ def format_shutdown_debug(details) -> str:
     )
 
 def main() -> None:
+    global HAPPY_FISH_STATUS_UNTIL
+
     pinch_was_active = False
     pinch_start_time = None
     last_keypress_time = 0.0
@@ -602,9 +731,42 @@ def main() -> None:
     pi_shutdown_last_seen_time = None
     pi_shutdown_status = "none"
     pi_shutdown_gesture_frame_active = False
+    happy_fish_hold_start_time = None
+    happy_fish_last_seen_time = None
+    happy_fish_last_keypress_time = 0.0
+    happy_fish_mode_until = 0.0
+    happy_fish_sent_for_hold = False
 
     hand_found_start_time = None
     hand_found_snapshot_saved = False
+
+    def shutdown_warning_flag_is_active(current_time: float) -> bool:
+        # Return True when shutdown warning colors should override Happy Fish.
+        if pi_shutdown_hold_start_time is not None:
+            return (
+                current_time - pi_shutdown_hold_start_time
+                >= PI_SHUTDOWN_YELLOW_SECONDS
+            )
+
+        if shutdown_hold_start_time is not None:
+            return (
+                current_time - shutdown_hold_start_time
+                >= SHUTDOWN_YELLOW_SECONDS
+            )
+
+        return False
+
+    def happy_fish_status_is_active(current_time: float) -> bool:
+        # Return True while the OpenGhost Happy Fish status timer is active.
+        return current_time < happy_fish_mode_until
+
+    def refresh_happy_fish_status_flag(current_time: float) -> None:
+        # Keep the flag magenta during Happy Fish mode unless shutdown warning wins.
+        if (
+            happy_fish_status_is_active(current_time)
+            and not shutdown_warning_flag_is_active(current_time)
+        ):
+            set_status_flag(status_root, status_label, HAPPY_FISH_COLOR)
 
     status_root, status_label = create_status_window()
 
@@ -625,6 +787,7 @@ def main() -> None:
     print(f"Target window: {TARGET_WINDOW_NAME}")
     print(f"Feed key to send: {KEY_TO_SEND}")
     print(f"Quit key to send: {QUIT_KEY_TO_SEND}")
+    print(f"Happy Fish key to send: {HAPPY_KEY_TO_SEND}")
     print(f"Pinch-on threshold: {PINCH_ON_THRESHOLD}")
     print(f"Release threshold: {PINCH_RELEASE_THRESHOLD}")
     print(f"Pinch hold time: {PINCH_HOLD_SECONDS}")
@@ -642,6 +805,13 @@ def main() -> None:
     print(f"Pi shutdown max extended fingers: {PI_SHUTDOWN_MAX_EXTENDED_FINGERS}")
     print(f"Pi shutdown reject thumb extended: {PI_SHUTDOWN_REJECT_THUMB_EXTENDED}")
     print(f"Pi shutdown thumb extended ratio: {PI_SHUTDOWN_THUMB_EXTENDED_RATIO}")
+    print(f"Happy Fish thumbs-up hold time: {HAPPY_FISH_HOLD_SECONDS}")
+    print(f"Happy Fish gesture grace period: {HAPPY_FISH_GESTURE_GRACE_SECONDS}")
+    print(f"Happy Fish status duration: {HAPPY_FISH_STATUS_SECONDS}")
+    print(f"Happy Fish status flag color: {HAPPY_FISH_COLOR}")
+    print(f"Happy Fish thumb extended ratio: {HAPPY_FISH_THUMB_EXTENDED_RATIO}")
+    print(f"Happy Fish thumb/wrist ratio: {HAPPY_FISH_MIN_THUMB_WRIST_RATIO}")
+    print(f"Happy Fish max extended fingers: {HAPPY_FISH_MAX_EXTENDED_FINGERS}")
     print(
         "Pi shutdown max thumb/index distance: "
         f"{PI_SHUTDOWN_MAX_THUMB_INDEX_DISTANCE}"
@@ -661,6 +831,7 @@ def main() -> None:
     print("Pinch thumb/index finger, then release, to send F.")
     print("Hold a two-finger V / peace-out gesture for 5 seconds to quit the aquarium.")
     print("Hold a closed fist for 8 seconds to shut down the Raspberry Pi.")
+    print("Hold a thumbs-up gesture for 2 seconds to start Happy Fish mode.")
     print("Press Ctrl+C to stop.")
 
     try:
@@ -688,6 +859,21 @@ def main() -> None:
                     hand_landmarks, gesture_details
                 )
                 pi_gesture_debug = format_pi_shutdown_debug(pi_gesture_details)
+                thumbs_up_gesture, thumbs_up_details = evaluate_thumbs_up_gesture(
+                    hand_landmarks, gesture_details
+                )
+                thumbs_up_debug = format_thumbs_up_debug(thumbs_up_details)
+
+                if (
+                    shutdown_gesture
+                    or shutdown_hold_start_time is not None
+                    or pi_shutdown_gesture
+                    or pi_shutdown_hold_start_time is not None
+                ):
+                    # Shutdown gestures have priority.  A peace sign can look
+                    # thumb-extended in some MediaPipe frames, so do not let it
+                    # also start Happy Fish mode.
+                    thumbs_up_gesture = False
 
                 if hand_found_start_time is None:
                     hand_found_start_time = now
@@ -787,6 +973,16 @@ def main() -> None:
                         )
                         pi_shutdown_status = new_pi_shutdown_status
 
+                        if new_pi_shutdown_status in ("yellow", "red"):
+                            if now < happy_fish_mode_until or happy_fish_hold_start_time is not None:
+                                debug_print(
+                                    "Happy Fish mode cancelled: Pi shutdown sequence reached "
+                                    f"{new_pi_shutdown_status} status"
+                                )
+                            happy_fish_mode_until = 0.0
+                            happy_fish_hold_start_time = None
+                            happy_fish_sent_for_hold = False
+
                     # While the Pi shutdown gesture is active, do not also treat
                     # the hand as a peace-sign aquarium-quit gesture.
                     shutdown_hold_start_time = None
@@ -850,6 +1046,16 @@ def main() -> None:
                         )
                         shutdown_status = new_shutdown_status
 
+                        if new_shutdown_status in ("yellow", "red"):
+                            if now < happy_fish_mode_until or happy_fish_hold_start_time is not None:
+                                debug_print(
+                                    "Happy Fish mode cancelled: aquarium shutdown sequence reached "
+                                    f"{new_shutdown_status} status"
+                                )
+                            happy_fish_mode_until = 0.0
+                            happy_fish_hold_start_time = None
+                            happy_fish_sent_for_hold = False
+
                 else:
                     if shutdown_hold_start_time is not None:
                         shutdown_gap_time = (
@@ -892,6 +1098,77 @@ def main() -> None:
                             set_status_flag(status_root, status_label, HAND_FOUND_COLOR)
                     else:
                         set_status_flag(status_root, status_label, HAND_FOUND_COLOR)
+
+                if now < happy_fish_mode_until:
+                    set_status_flag(status_root, status_label, HAPPY_FISH_COLOR)
+
+                if thumbs_up_gesture:
+                    happy_fish_last_seen_time = now
+
+                    if happy_fish_hold_start_time is None:
+                        happy_fish_hold_start_time = now
+                        happy_fish_sent_for_hold = False
+                        debug_print(
+                            "Happy Fish thumbs-up gesture started: "
+                            f"{thumbs_up_debug}"
+                        )
+                    happy_fish_hold_time = now - happy_fish_hold_start_time
+                    if (
+                        happy_fish_hold_time >= HAPPY_FISH_HOLD_SECONDS
+                        and not happy_fish_sent_for_hold
+                        and now - happy_fish_last_keypress_time >= KEYPRESS_COOLDOWN_SECONDS
+                    ):
+                        debug_print(
+                            "Happy Fish thumbs-up gesture triggered: "
+                            f"held {happy_fish_hold_time:.2f}s"
+                        )
+                        send_happy_fish_keypress()
+                        happy_fish_last_keypress_time = now
+                        happy_fish_mode_until = now + HAPPY_FISH_STATUS_SECONDS
+                        HAPPY_FISH_STATUS_UNTIL = happy_fish_mode_until
+                        happy_fish_sent_for_hold = True
+                        set_status_flag(status_root, status_label, HAPPY_FISH_COLOR)
+                    elif now < happy_fish_mode_until:
+                        set_status_flag(status_root, status_label, HAPPY_FISH_COLOR)
+                    else:
+                        set_status_flag(status_root, status_label, HAND_FOUND_COLOR)
+                    pinch_was_active = False
+                    pinch_start_time = None
+                    if DEBUG_MESSAGES and now - last_debug_time >= DEBUG_INTERVAL_SECONDS:
+                        print(
+                            "\n" + f"hand detected: thumbs_up_hold={happy_fish_hold_time:.2f}, "
+                            f"thumbs_up_gesture={thumbs_up_gesture}, "
+                            f"happy_fish_active={now < happy_fish_mode_until}, "
+                            f"{thumbs_up_debug}"
+                        )
+                        last_debug_time = now
+                    refresh_happy_fish_status_flag(now)
+                    time.sleep(0.01)
+                    continue
+                elif happy_fish_hold_start_time is not None:
+                    happy_fish_gap_time = (
+                        999.0
+                        if happy_fish_last_seen_time is None
+                        else now - happy_fish_last_seen_time
+                    )
+
+                    if happy_fish_gap_time <= HAPPY_FISH_GESTURE_GRACE_SECONDS:
+                        happy_fish_hold_time = now - happy_fish_hold_start_time
+                        if DEBUG_MESSAGES and now - last_debug_time >= DEBUG_INTERVAL_SECONDS:
+                            print(
+                                "\nHappy Fish thumbs-up gesture grace: "
+                                f"gap={happy_fish_gap_time:.2f}s, "
+                                f"hold={happy_fish_hold_time:.2f}s"
+                            )
+                            last_debug_time = now
+                    else:
+                        debug_print(
+                            "Happy Fish thumbs-up gesture cancelled: "
+                            f"gap={happy_fish_gap_time:.2f}s"
+                        )
+                        happy_fish_hold_start_time = None
+                        happy_fish_last_seen_time = None
+                        happy_fish_sent_for_hold = False
 
                 thumb_dist = gesture_details["thumb_index_distance"]
 
@@ -942,7 +1219,7 @@ def main() -> None:
                         else now - shutdown_hold_start_time
                     )
                     print(
-                        f"hand detected: thumb_dist={thumb_dist:.3f}, "
+                        "\n" + f"hand detected: thumb_dist={thumb_dist:.3f}, "
                         f"pinch_on={PINCH_ON_THRESHOLD:.3f}, "
                         f"release={PINCH_RELEASE_THRESHOLD:.3f}, "
                         f"pinch_hold={pinch_hold_time:.2f}, "
@@ -986,7 +1263,7 @@ def main() -> None:
 
                         if DEBUG_MESSAGES and now - last_debug_time >= DEBUG_INTERVAL_SECONDS:
                             print(
-                                "no hand detected, but pi shutdown grace is active: "
+                                "\nno hand detected, but pi shutdown grace is active: "
                                 f"gap={pi_shutdown_gap_time:.2f}s, "
                                 f"pi_shutdown_hold={pi_shutdown_hold_time:.2f}s, "
                                 f"pi_shutdown_status={pi_shutdown_status}"
@@ -1022,7 +1299,7 @@ def main() -> None:
 
                         if DEBUG_MESSAGES and now - last_debug_time >= DEBUG_INTERVAL_SECONDS:
                             print(
-                                "no hand detected, but shutdown grace is active: "
+                                "\nno hand detected, but shutdown grace is active: "
                                 f"gap={shutdown_gap_time:.2f}s, "
                                 f"shutdown_hold={shutdown_hold_time:.2f}s, "
                                 f"shutdown_status={shutdown_status}"
@@ -1043,12 +1320,37 @@ def main() -> None:
                     set_status_flag(status_root, status_label, "black")
 
                     if DEBUG_MESSAGES and now - last_debug_time >= DEBUG_INTERVAL_SECONDS:
-                        print("no hand detected")
+                        print("\nno hand detected")
                         last_debug_time = now
 
+                if happy_fish_hold_start_time is not None:
+                    happy_fish_gap_time = (
+                        999.0
+                        if happy_fish_last_seen_time is None
+                        else now - happy_fish_last_seen_time
+                    )
+
+                    if happy_fish_gap_time <= HAPPY_FISH_GESTURE_GRACE_SECONDS:
+                        happy_fish_hold_time = now - happy_fish_hold_start_time
+                        if DEBUG_MESSAGES and now - last_debug_time >= DEBUG_INTERVAL_SECONDS:
+                            print(
+                                "\nno hand detected, but Happy Fish thumbs-up grace is active: "
+                                f"gap={happy_fish_gap_time:.2f}s, "
+                                f"hold={happy_fish_hold_time:.2f}s"
+                            )
+                            last_debug_time = now
+                    else:
+                        debug_print(
+                            "Happy Fish thumbs-up gesture cancelled: no hand detected "
+                            f"for {happy_fish_gap_time:.2f}s"
+                        )
+                        happy_fish_hold_start_time = None
+                        happy_fish_last_seen_time = None
+                        happy_fish_sent_for_hold = False
                 pinch_was_active = False
                 pinch_start_time = None
 
+            refresh_happy_fish_status_flag(now)
             time.sleep(0.01)
 
     except KeyboardInterrupt:
