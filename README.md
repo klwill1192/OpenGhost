@@ -54,7 +54,8 @@ pinch_release_keypress.py
 Supported gestures:
 
 ```text
-Pinch thumb and index finger, then release     Send F to feed the fish
+Pinch thumb and index finger, then release     Send f to feed the fish
+Hold a "thumbs up" gesture                     Send h to start "Happy Fish" mode
 Hold a two-finger "peace sign" gesture         Send q to quit the aquarium
 Hold a closed-fist gesture                     Shut down the Raspberry Pi
 ```
@@ -72,11 +73,13 @@ Black flag     No hand detected by the camera
 Green flag     Hand detected / normal operation
 Yellow flag    Shutdown gesture has been held for 2 seconds
 Red flag       Shutdown gesture has been held for 4 seconds; shutdown is imminent
+Magenta flag   Currently in "Happy Fish" mode: increased activity and color changing
 ```
 
 Timing:
 
 ```text
+Thumbs up hold      2 seconds    Start "Happy Fish" mode
 Peace sign hold     5 seconds    Quit aquarium
 Closed fist hold    7 seconds    Shut down Raspberry Pi
 ```
