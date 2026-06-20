@@ -621,10 +621,52 @@ def evaluate_thumbs_up_gesture(hand_landmarks, gesture_details):
     middle_extended = "middle" in extended_fingers
     peace_like = index_extended and middle_extended
 
+    index_ratio = ratios["index"]
+    middle_ratio = ratios["middle"]
+
+    index_middle_spread = gesture_details.get("index_middle_spread", 0.0)
+    peace_spread_like = (
+        index_extended
+        and middle_extended
+        and index_middle_spread >= SHUTDOWN_MIN_V_SPREAD
+    )
+
+    # Rescue path 1:
+    # Accept near-miss thumbs-up frames where the thumb is clear, the index
+    # finger is still interpreted as folded, and only middle/ring/pinky are
+    # being over-counted as extended.
+    thumbs_up_rescue = (
+        thumb_extended
+        and not index_extended
+        and not peace_like
+        and thumb_wrist_ratio >= 1.65
+        and thumb_index_distance >= 0.34
+        and index_ratio <= 1.25
+        and middle_ratio <= 1.45
+    )
+
+    # Rescue path 2:
+    # Accept angled thumbs-up frames where MediaPipe over-counts three or four
+    # non-thumb fingers as extended, but the thumb is very prominent and the
+    # index/middle fingertips are not spread like a deliberate peace sign.
+    thumbs_up_angle_rescue = (
+        thumb_extended
+        and not peace_spread_like
+        and thumb_wrist_ratio >= 1.62
+        and thumb_index_distance >= 0.40
+        and index_middle_spread <= SHUTDOWN_MIN_V_SPREAD
+        and index_ratio <= 1.45
+        and middle_ratio <= 1.45
+    )
+
     thumbs_up = (
         thumb_extended
-        and few_non_thumb_fingers_extended
-        and not peace_like
+        and not peace_spread_like
+        and (
+            few_non_thumb_fingers_extended
+            or thumbs_up_rescue
+            or thumbs_up_angle_rescue
+        )
     )
     details = {
         "ratios": ratios,
@@ -641,7 +683,11 @@ def evaluate_thumbs_up_gesture(hand_landmarks, gesture_details):
         "few_non_thumb_fingers_extended": few_non_thumb_fingers_extended,
         "index_extended": index_extended,
         "middle_extended": middle_extended,
+        "index_middle_spread": index_middle_spread,
         "peace_like": peace_like,
+        "peace_spread_like": peace_spread_like,
+        "thumbs_up_rescue": thumbs_up_rescue,
+        "thumbs_up_angle_rescue": thumbs_up_angle_rescue,
         "thumbs_up": thumbs_up,
     }
     return thumbs_up, details
@@ -664,7 +710,11 @@ def format_thumbs_up_debug(details) -> str:
         f"few_fingers:{details['few_non_thumb_fingers_extended']}, "
         f"index_extended:{details['index_extended']}, "
         f"middle_extended:{details['middle_extended']}, "
+        f"index_middle_spread={details.get('index_middle_spread', 0.0):.3f}, "
         f"peace_like:{details['peace_like']}, "
+        f"peace_spread_like:{details.get('peace_spread_like')}, "
+        f"thumbs_up_rescue:{details['thumbs_up_rescue']}, "
+        f"thumbs_up_angle_rescue:{details.get('thumbs_up_angle_rescue')}, "
         f"thumbs_up:{details['thumbs_up']}"
     )
 
