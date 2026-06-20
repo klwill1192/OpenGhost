@@ -125,7 +125,7 @@ STATUS_WINDOW_WIDTH = env_int("STATUS_WINDOW_WIDTH", 40)
 STATUS_WINDOW_HEIGHT = env_int("STATUS_WINDOW_HEIGHT", 40)
 STATUS_FLAG_FONT_SIZE = env_int("STATUS_FLAG_FONT_SIZE", 24)
 
-NO_HAND_FLAG = "⚐"
+NO_HAND_FLAG = "⚑"
 HAND_FLAG = "⚑"
 
 NO_HAND_COLOR = "white"
@@ -336,7 +336,7 @@ def set_status_flag(root, label, flag_color: str) -> None:
 
     Happy Fish mode is a timed status that should survive brief hand loss.
     Let yellow/red shutdown warnings override it, but prevent normal green
-    or black/no-hand updates from overwriting magenta while the Happy Fish
+    or white/no-hand updates from overwriting magenta while the Happy Fish
     status timer is active.
     """
     if (
@@ -345,7 +345,7 @@ def set_status_flag(root, label, flag_color: str) -> None:
     ):
         flag_color = HAPPY_FISH_COLOR
 
-    if flag_color == "black":
+    if flag_color == NO_HAND_COLOR:
         label.config(text=NO_HAND_FLAG, fg=NO_HAND_COLOR)
     else:
         label.config(text=HAND_FLAG, fg=flag_color)
@@ -1279,7 +1279,7 @@ def main() -> None:
                         pi_shutdown_hold_start_time = None
                         pi_shutdown_last_seen_time = None
                         pi_shutdown_status = "none"
-                        set_status_flag(status_root, status_label, "black")
+                        set_status_flag(status_root, status_label, NO_HAND_COLOR)
 
                 elif shutdown_hold_start_time is not None:
                     shutdown_gap_time = (
@@ -1315,9 +1315,9 @@ def main() -> None:
                         shutdown_hold_start_time = None
                         shutdown_last_seen_time = None
                         shutdown_status = "none"
-                        set_status_flag(status_root, status_label, "black")
+                        set_status_flag(status_root, status_label, NO_HAND_COLOR)
                 else:
-                    set_status_flag(status_root, status_label, "black")
+                    set_status_flag(status_root, status_label, NO_HAND_COLOR)
 
                     if DEBUG_MESSAGES and now - last_debug_time >= DEBUG_INTERVAL_SECONDS:
                         print("\nno hand detected")

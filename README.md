@@ -69,7 +69,7 @@ asciiquarium-window
 The Tkinter status flag shows the current camera/gesture state:
 
 ```text
-Black flag     No hand detected by the camera
+White flag     No hand detected by the camera
 Green flag     Hand detected / normal operation
 Yellow flag    Shutdown gesture has been held for 2 seconds
 Red flag       Shutdown gesture has been held for 4 seconds; shutdown is imminent
