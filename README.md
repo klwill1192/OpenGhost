@@ -74,13 +74,15 @@ Green flag     Hand detected / normal operation
 Yellow flag    Shutdown gesture has been held for 2 seconds
 Red flag       Shutdown gesture has been held for 4 seconds; shutdown is imminent
 Magenta flag   Currently in "Happy Fish" mode: increased activity and color changing
+
 | Flag | Meaning |
-|---|---|
-| <HTML><span style="color:gray">⚐</span></HTML> White outline flag | No hand detected by the camera |
-| <HTML><span style="color:green">⚑</span></HTML> Green flag | Hand detected / normal operation |
-| <HTML><span style="color:magenta">⚑</span></HTML> Magenta flag | Happy Fish mode was triggered and is active/recent |
-| <HTML><span style="color:yellow">⚑</span></HTML> Yellow flag | Shutdown gesture has been held for 2 seconds |
-| <HTML><span style="color:red">⚑</span></HTML> Red flag | Shutdown gesture has been held for 4 seconds; shutdown is imminent |
+| :---: | :--- |
+| ![White Flag](https://shields.io) | No hand detected by the camera |
+| ![Green Flag](https://shields.io) | Hand detected / normal operation |
+| ![Magenta Flag](https://shields.io) | Happy Fish mode was triggered and is active/recent |
+| ![Yellow Flag](https://shields.io) | Shutdown gesture has been held for 2 seconds |
+| ![Red Flag](https://shields.io) | Shutdown gesture has been held for 4 seconds; shutdown is imminent |
+
 ```
 
 Timing:
