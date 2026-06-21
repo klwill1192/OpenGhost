@@ -74,6 +74,13 @@ Green flag     Hand detected / normal operation
 Yellow flag    Shutdown gesture has been held for 2 seconds
 Red flag       Shutdown gesture has been held for 4 seconds; shutdown is imminent
 Magenta flag   Currently in "Happy Fish" mode: increased activity and color changing
+| Flag | Meaning |
+|---|---|
+| <span style="color:gray">⚐</span> White outline flag | No hand detected by the camera |
+| <span style="color:green">⚑</span> Green flag | Hand detected / normal operation |
+| <span style="color:magenta">⚑</span> Magenta flag | Happy Fish mode was triggered and is active/recent |
+| <span style="color:yellow">⚑</span> Yellow flag | Shutdown gesture has been held for 2 seconds |
+| <span style="color:red">⚑</span> Red flag | Shutdown gesture has been held for 4 seconds; shutdown is imminent |
 ```
 
 Timing:
