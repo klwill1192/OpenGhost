@@ -68,14 +68,13 @@ asciiquarium-window
 
 The Tkinter status flag shows the current camera/gesture state:
 
-
 | Flag | Meaning |
-| :--- | :--- |
-| ![#FFFFFF](https://shields.io/badge/%E2%9A%90-FFFFFF?style=flat-square)  White outline flag | No hand detected by the camera |
-| ![#00FF00](https://shields.io/badge/%E2%9A%91-00FF00?style=flat-square)  Green flag | Hand detected / normal operation |
-| ![#FF00FF](https://shields.io/badge/%E2%9A%91-FF00FF?style=flat-square)  Magenta flag | Happy Fish mode was triggered and is active/recent |
-| ![#FFFF00](https://shields.io/badge/%E2%9A%91-FFFF00?style=flat-square)  Yellow flag | Shutdown gesture has been held for 2 seconds |
-| ![#FF0000](https://shields.io/badge/%E2%9A%91-FF0000?style=flat-square)  Red flag | Shutdown gesture has been held for 4 seconds; shutdown is imminent |
+|:---:|:---|
+| <img src="images/status_flag_no_hand.png" alt="White/gray outline flag" width="24"> | No hand detected by the camera |
+| <img src="images/status_flag_green.png" alt="Green flag" width="24"> | Hand detected / normal operation |
+| <img src="images/status_flag_magenta.png" alt="Magenta flag" width="24"> | Happy Fish mode was triggered and is active/recent |
+| <img src="images/status_flag_yellow.png" alt="Yellow flag" width="24"> | Shutdown gesture has been held for 2 seconds |
+| <img src="images/status_flag_red.png" alt="Red flag" width="24"> | Shutdown gesture has been held for 4 seconds; shutdown is imminent |
 
 Timing:
 
