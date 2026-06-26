@@ -81,10 +81,21 @@ HAPPY_FISH_THUMB_EXTENDED_RATIO = 0.85
 HAPPY_FISH_MIN_THUMB_WRIST_RATIO = 1.15
 HAPPY_FISH_MAX_EXTENDED_FINGERS = 2
 
+# Easter Egg gesture tuning.
+EASTER_EGG_HOLD_SECONDS = 2.0
+EASTER_EGG_GESTURE_GRACE_SECONDS = 2.50
+EASTER_EGG_EXTENDED_RATIO = 1.20
+EASTER_EGG_SECONDARY_MAX_RATIO = 1.95
+EASTER_EGG_RING_MAX_RATIO = 1.55
+EASTER_EGG_PINKY_MAX_RATIO = 1.45
+EASTER_EGG_MIN_PRIMARY_MARGIN = 0.10
+EASTER_EGG_MAX_THUMB_INDEX_DISTANCE = 0.180
+
 # Keypress target
 KEY_TO_SEND = "f"
 QUIT_KEY_TO_SEND = "q"
 HAPPY_KEY_TO_SEND = "h"
+EASTER_EGG_KEY_TO_SEND = "e"
 TARGET_WINDOW_NAME = "asciiquarium-window"
 
 # Debug output
@@ -134,6 +145,32 @@ SHUTDOWN_YELLOW_COLOR = "yellow"
 SHUTDOWN_RED_COLOR = "red"
 HAPPY_FISH_COLOR = "magenta"
 HAPPY_FISH_STATUS_UNTIL = 0.0
+
+# Keep this status pattern aligned with the aquarium Happy Fish color cycle.
+# Set HAPPY_FISH_FLAG_PATTERN_NAME = "solid_magenta" to restore the old behavior.
+HAPPY_FISH_FLAG_FRAME_SECONDS = 0.25
+HAPPY_FISH_FLAG_PATTERN_NAME = "flashing_magenta"
+HAPPY_FISH_FLAG_PATTERNS = {
+    "solid_magenta": ["magenta"],
+    "flashing_magenta": ["magenta","magenta","black"],
+    "happy_fish_rainbow": ["red", "yellow", "lime", "cyan", "blue", "magenta"],
+}
+
+# Keep this status pattern aligned with the aquarium Easter Egg pattern.
+# Options:
+# - red_white_red_white
+# - red_black_red_black
+# - red_white_red_black
+EASTER_EGG_STATUS_SECONDS = 10.0
+EASTER_EGG_FLAG_FRAME_SECONDS = 0.25
+EASTER_EGG_FLAG_PATTERN_NAME = "red_red_black_black"
+EASTER_EGG_FLAG_PATTERNS = {
+    "red_white_red_white": ["red", "white", "red", "white"],
+    "red_black_red_black": ["red", "black", "red", "black"],
+    "red_white_red_black": ["red", "white", "red", "black"],
+    "red_red_black_black": ["red", "red", "black", "black"],
+}
+EASTER_EGG_STATUS_UNTIL = 0.0
 
 
 HandLandmark = mp.solutions.hands.HandLandmark
@@ -271,6 +308,11 @@ def send_happy_fish_keypress() -> None:
     send_key_to_target(HAPPY_KEY_TO_SEND, HAPPY_KEY_TO_SEND.upper())
 
 
+def send_easter_egg_keypress() -> None:
+    """Send E to the target xterm window to start Easter Egg mode."""
+    send_key_to_target(EASTER_EGG_KEY_TO_SEND, EASTER_EGG_KEY_TO_SEND.upper())
+
+
 def send_quit_keypress() -> None:
     """Send q to the aquarium, then close the xterm if q did not exit it."""
     if send_key_to_target(
@@ -331,19 +373,40 @@ def create_status_window():
     return root, label
 
 
+def current_easter_egg_flag_color(current_time: float) -> str:
+    """Return the current Easter Egg flag color from the selected pattern."""
+    pattern = EASTER_EGG_FLAG_PATTERNS.get(
+        EASTER_EGG_FLAG_PATTERN_NAME,
+        EASTER_EGG_FLAG_PATTERNS["red_black_red_black"],
+    )
+    frame = int(current_time / EASTER_EGG_FLAG_FRAME_SECONDS) % len(pattern)
+    return pattern[frame]
+
+
+def current_happy_fish_flag_color(current_time: float) -> str:
+    """Return the current Happy Fish flag color from the selected pattern."""
+    pattern = HAPPY_FISH_FLAG_PATTERNS.get(
+        HAPPY_FISH_FLAG_PATTERN_NAME,
+        HAPPY_FISH_FLAG_PATTERNS["happy_fish_rainbow"],
+    )
+    frame = int(current_time / HAPPY_FISH_FLAG_FRAME_SECONDS) % len(pattern)
+    return pattern[frame]
+
+
 def set_status_flag(root, label, flag_color: str) -> None:
     """Update the overlay flag.
 
-    Happy Fish mode is a timed status that should survive brief hand loss.
-    Let yellow/red shutdown warnings override it, but prevent normal green
-    or white/no-hand updates from overwriting magenta while the Happy Fish
-    status timer is active.
+    Timed visual modes should survive brief hand loss. Yellow/red shutdown
+    warnings override everything. Easter Egg status has priority over Happy
+    Fish status while its timer is active.
     """
-    if (
-        time.time() < HAPPY_FISH_STATUS_UNTIL
-        and flag_color not in (SHUTDOWN_YELLOW_COLOR, SHUTDOWN_RED_COLOR)
-    ):
-        flag_color = HAPPY_FISH_COLOR
+    current_time = time.time()
+
+    if flag_color not in (SHUTDOWN_YELLOW_COLOR, SHUTDOWN_RED_COLOR):
+        if current_time < EASTER_EGG_STATUS_UNTIL:
+            flag_color = current_easter_egg_flag_color(current_time)
+        elif current_time < HAPPY_FISH_STATUS_UNTIL:
+            flag_color = current_happy_fish_flag_color(current_time)
 
     if flag_color == NO_HAND_COLOR:
         label.config(text=NO_HAND_FLAG, fg=NO_HAND_COLOR)
@@ -543,11 +606,13 @@ def evaluate_pi_shutdown_gesture(hand_landmarks, gesture_details):
     )
     thumb_extended = thumb_extended_by_index or thumb_too_far_from_index
 
-    few_non_thumb_fingers_extended = (
-        extended_count <= PI_SHUTDOWN_MAX_EXTENDED_FINGERS
-    )
+    # Treat a real closed fist as no clearly extended non-thumb fingers.
+    # Earlier versions allowed one extended finger, which made the Easter Egg
+    # gesture look too much like a shutdown hold in some camera frames.
+    middle_conflict = ratios["middle"] >= EASTER_EGG_EXTENDED_RATIO
+    few_non_thumb_fingers_extended = extended_count == 0
     thumb_ok = (not PI_SHUTDOWN_REJECT_THUMB_EXTENDED) or (not thumb_extended)
-    closed_fist = few_non_thumb_fingers_extended and thumb_ok
+    closed_fist = few_non_thumb_fingers_extended and thumb_ok and not middle_conflict
 
     details = {
         "ratios": ratios,
@@ -564,6 +629,7 @@ def evaluate_pi_shutdown_gesture(hand_landmarks, gesture_details):
         "thumb_extended_by_wrist": thumb_extended_by_wrist,
         "thumb_too_far_from_index": thumb_too_far_from_index,
         "thumb_extended": thumb_extended,
+        "middle_conflict": middle_conflict,
         "few_non_thumb_fingers_extended": few_non_thumb_fingers_extended,
         "thumb_ok": thumb_ok,
         "closed_fist": closed_fist,
@@ -659,9 +725,25 @@ def evaluate_thumbs_up_gesture(hand_landmarks, gesture_details):
         and middle_ratio <= 1.45
     )
 
+    # Do not accept frames where index and middle are both extended as
+    # thumbs-up. That pose belongs to other gesture paths.
+    index_middle_conflict = (
+        index_extended
+        and middle_extended
+        and middle_ratio >= 1.20
+    )
+
+    middle_only_conflict = (
+        middle_extended
+        and middle_ratio >= 1.20
+        and thumb_index_distance < 0.12
+    )
+
     thumbs_up = (
         thumb_extended
         and not peace_spread_like
+        and not index_middle_conflict
+        and not middle_only_conflict
         and (
             few_non_thumb_fingers_extended
             or thumbs_up_rescue
@@ -686,11 +768,56 @@ def evaluate_thumbs_up_gesture(hand_landmarks, gesture_details):
         "index_middle_spread": index_middle_spread,
         "peace_like": peace_like,
         "peace_spread_like": peace_spread_like,
+        "index_middle_conflict": index_middle_conflict,
+        "middle_only_conflict": middle_only_conflict,
         "thumbs_up_rescue": thumbs_up_rescue,
         "thumbs_up_angle_rescue": thumbs_up_angle_rescue,
         "thumbs_up": thumbs_up,
     }
     return thumbs_up, details
+
+
+def evaluate_easter_egg_gesture(hand_landmarks, gesture_details):
+    """Return Easter Egg gesture decision plus debug data."""
+    ratios = gesture_details["ratios"]
+
+    middle_ratio = ratios["middle"]
+    index_ratio = ratios["index"]
+    ring_ratio = ratios["ring"]
+    pinky_ratio = ratios["pinky"]
+    thumb_index_distance = gesture_details["thumb_index_distance"]
+
+    primary_extended = middle_ratio >= EASTER_EGG_EXTENDED_RATIO
+
+    # In real camera frames, this gesture may appear either as a middle-only
+    # extension or as index+middle because the adjacent finger is over-reported.
+    side_fingers_ok = (
+        index_ratio <= EASTER_EGG_SECONDARY_MAX_RATIO
+        and ring_ratio <= EASTER_EGG_RING_MAX_RATIO
+        and pinky_ratio <= EASTER_EGG_PINKY_MAX_RATIO
+    )
+    primary_reasonable = (
+        middle_ratio + EASTER_EGG_MIN_PRIMARY_MARGIN >= index_ratio
+    )
+    thumb_not_prominent = thumb_index_distance <= EASTER_EGG_MAX_THUMB_INDEX_DISTANCE
+
+    easter_egg_gesture = (
+        primary_extended
+        and side_fingers_ok
+        and primary_reasonable
+        and thumb_not_prominent
+    )
+
+    details = {
+        "ratios": ratios,
+        "thumb_index_distance": thumb_index_distance,
+        "primary_extended": primary_extended,
+        "side_fingers_ok": side_fingers_ok,
+        "primary_reasonable": primary_reasonable,
+        "thumb_not_prominent": thumb_not_prominent,
+        "easter_egg_gesture": easter_egg_gesture,
+    }
+    return easter_egg_gesture, details
 
 
 def format_thumbs_up_debug(details) -> str:
@@ -707,6 +834,7 @@ def format_thumbs_up_debug(details) -> str:
         f"thumb_ratio={details['thumb_extension_ratio']:.2f}, "
         f"thumb_wrist_ratio={details['thumb_wrist_ratio']:.2f}, "
         f"thumb_extended:{details['thumb_extended']}, "
+        f"middle_conflict:{details.get('middle_conflict', False)}, "
         f"few_fingers:{details['few_non_thumb_fingers_extended']}, "
         f"index_extended:{details['index_extended']}, "
         f"middle_extended:{details['middle_extended']}, "
@@ -716,6 +844,22 @@ def format_thumbs_up_debug(details) -> str:
         f"thumbs_up_rescue:{details['thumbs_up_rescue']}, "
         f"thumbs_up_angle_rescue:{details.get('thumbs_up_angle_rescue')}, "
         f"thumbs_up:{details['thumbs_up']}"
+    )
+
+
+def format_easter_egg_debug(details) -> str:
+    """Format Easter Egg gesture measurements."""
+    ratio_text = ", ".join(
+        f"{name}:{ratio:.2f}" for name, ratio in details["ratios"].items()
+    )
+    return (
+        f"easter_ratios=[{ratio_text}], "
+        f"easter_thumb_index:{details['thumb_index_distance']:.3f}, "
+        f"primary_extended:{details['primary_extended']}, "
+        f"side_fingers_ok:{details['side_fingers_ok']}, "
+        f"primary_reasonable:{details['primary_reasonable']}, "
+        f"thumb_not_prominent:{details['thumb_not_prominent']}, "
+        f"easter_egg:{details['easter_egg_gesture']}"
     )
 
 
@@ -765,7 +909,7 @@ def format_shutdown_debug(details) -> str:
     )
 
 def main() -> None:
-    global HAPPY_FISH_STATUS_UNTIL
+    global HAPPY_FISH_STATUS_UNTIL, EASTER_EGG_STATUS_UNTIL
 
     pinch_was_active = False
     pinch_start_time = None
@@ -786,6 +930,11 @@ def main() -> None:
     happy_fish_last_keypress_time = 0.0
     happy_fish_mode_until = 0.0
     happy_fish_sent_for_hold = False
+
+    easter_egg_hold_start_time = None
+    easter_egg_last_seen_time = None
+    easter_egg_last_keypress_time = 0.0
+    easter_egg_sent_for_hold = False
 
     hand_found_start_time = None
     hand_found_snapshot_saved = False
@@ -816,7 +965,7 @@ def main() -> None:
             happy_fish_status_is_active(current_time)
             and not shutdown_warning_flag_is_active(current_time)
         ):
-            set_status_flag(status_root, status_label, HAPPY_FISH_COLOR)
+            set_status_flag(status_root, status_label, current_happy_fish_flag_color(now))
 
     status_root, status_label = create_status_window()
 
@@ -913,6 +1062,138 @@ def main() -> None:
                     hand_landmarks, gesture_details
                 )
                 thumbs_up_debug = format_thumbs_up_debug(thumbs_up_details)
+                easter_egg_gesture, easter_egg_details = evaluate_easter_egg_gesture(
+                    hand_landmarks, gesture_details
+                )
+                easter_egg_debug = format_easter_egg_debug(easter_egg_details)
+
+                if DEBUG_MESSAGES and now - last_debug_time >= DEBUG_INTERVAL_SECONDS:
+                    print(
+                        "\n"
+                        + f"Easter Egg check: {easter_egg_debug}"
+                    )
+                    last_debug_time = now
+
+                if easter_egg_gesture:
+                    thumbs_up_gesture = False
+                    shutdown_gesture = False
+                    pi_shutdown_gesture = False
+                    pinch_was_active = False
+                    pinch_start_time = None
+
+                # Easter Egg has priority over every other visible-hand gesture.
+                # MediaPipe may only recognize it for a few frames, so once a valid
+                # frame is seen, keep the hold alive through a generous grace window.
+                if easter_egg_gesture:
+                    easter_egg_last_seen_time = now
+
+                    if easter_egg_hold_start_time is None:
+                        easter_egg_hold_start_time = now
+                        easter_egg_sent_for_hold = False
+                        debug_print(
+                            "Easter Egg gesture started: "
+                            f"{easter_egg_debug}"
+                        )
+
+                    easter_egg_hold_time = now - easter_egg_hold_start_time
+                    if (
+                        easter_egg_hold_time >= EASTER_EGG_HOLD_SECONDS
+                        and not easter_egg_sent_for_hold
+                        and now - easter_egg_last_keypress_time >= KEYPRESS_COOLDOWN_SECONDS
+                    ):
+                        debug_print(
+                            "Easter Egg gesture triggered: "
+                            f"held {easter_egg_hold_time:.2f}s"
+                        )
+                        send_easter_egg_keypress()
+                        easter_egg_last_keypress_time = now
+                        EASTER_EGG_STATUS_UNTIL = now + EASTER_EGG_STATUS_SECONDS
+                        easter_egg_sent_for_hold = True
+                        set_status_flag(status_root, status_label, current_easter_egg_flag_color(now))
+
+                    # Cancel competing state immediately.
+                    shutdown_hold_start_time = None
+                    shutdown_last_seen_time = None
+                    shutdown_status = "none"
+                    pi_shutdown_hold_start_time = None
+                    pi_shutdown_last_seen_time = None
+                    pi_shutdown_status = "none"
+                    happy_fish_hold_start_time = None
+                    happy_fish_last_seen_time = None
+                    happy_fish_sent_for_hold = False
+                    pinch_was_active = False
+                    pinch_start_time = None
+                    set_status_flag(status_root, status_label, HAND_FOUND_COLOR)
+
+                    if DEBUG_MESSAGES and now - last_debug_time >= DEBUG_INTERVAL_SECONDS:
+                        print(
+                            "\n"
+                            + f"hand detected: easter_egg_hold={easter_egg_hold_time:.2f}, "
+                            f"easter_egg_gesture={easter_egg_gesture}, "
+                            f"{easter_egg_debug}"
+                        )
+                        last_debug_time = now
+                    time.sleep(0.01)
+                    continue
+
+                elif easter_egg_hold_start_time is not None:
+                    easter_egg_gap_time = (
+                        999.0
+                        if easter_egg_last_seen_time is None
+                        else now - easter_egg_last_seen_time
+                    )
+
+                    if easter_egg_gap_time <= EASTER_EGG_GESTURE_GRACE_SECONDS:
+                        easter_egg_hold_time = now - easter_egg_hold_start_time
+
+                        if (
+                            easter_egg_hold_time >= EASTER_EGG_HOLD_SECONDS
+                            and not easter_egg_sent_for_hold
+                            and now - easter_egg_last_keypress_time >= KEYPRESS_COOLDOWN_SECONDS
+                        ):
+                            debug_print(
+                                "Easter Egg gesture triggered during grace: "
+                                f"held {easter_egg_hold_time:.2f}s, "
+                                f"gap={easter_egg_gap_time:.2f}s"
+                            )
+                            send_easter_egg_keypress()
+                            easter_egg_last_keypress_time = now
+                            EASTER_EGG_STATUS_UNTIL = now + EASTER_EGG_STATUS_SECONDS
+                            easter_egg_sent_for_hold = True
+                            set_status_flag(status_root, status_label, current_easter_egg_flag_color(now))
+
+                        # During grace, continue suppressing competing gestures.
+                        shutdown_hold_start_time = None
+                        shutdown_last_seen_time = None
+                        shutdown_status = "none"
+                        pi_shutdown_hold_start_time = None
+                        pi_shutdown_last_seen_time = None
+                        pi_shutdown_status = "none"
+                        happy_fish_hold_start_time = None
+                        happy_fish_last_seen_time = None
+                        happy_fish_sent_for_hold = False
+                        pinch_was_active = False
+                        pinch_start_time = None
+                        set_status_flag(status_root, status_label, HAND_FOUND_COLOR)
+
+                        if DEBUG_MESSAGES and now - last_debug_time >= DEBUG_INTERVAL_SECONDS:
+                            print(
+                                "\nEaster Egg gesture grace: "
+                                f"gap={easter_egg_gap_time:.2f}s, "
+                                f"hold={easter_egg_hold_time:.2f}s, "
+                                f"{easter_egg_debug}"
+                            )
+                            last_debug_time = now
+                        time.sleep(0.01)
+                        continue
+
+                    debug_print(
+                        "Easter Egg gesture cancelled: "
+                        f"gap={easter_egg_gap_time:.2f}s"
+                    )
+                    easter_egg_hold_start_time = None
+                    easter_egg_last_seen_time = None
+                    easter_egg_sent_for_hold = False
 
                 if (
                     shutdown_gesture
@@ -1032,6 +1313,9 @@ def main() -> None:
                             happy_fish_mode_until = 0.0
                             happy_fish_hold_start_time = None
                             happy_fish_sent_for_hold = False
+                            easter_egg_hold_start_time = None
+                            easter_egg_last_seen_time = None
+                            easter_egg_sent_for_hold = False
 
                     # While the Pi shutdown gesture is active, do not also treat
                     # the hand as a peace-sign aquarium-quit gesture.
@@ -1105,6 +1389,9 @@ def main() -> None:
                             happy_fish_mode_until = 0.0
                             happy_fish_hold_start_time = None
                             happy_fish_sent_for_hold = False
+                            easter_egg_hold_start_time = None
+                            easter_egg_last_seen_time = None
+                            easter_egg_sent_for_hold = False
 
                 else:
                     if shutdown_hold_start_time is not None:
@@ -1150,7 +1437,7 @@ def main() -> None:
                         set_status_flag(status_root, status_label, HAND_FOUND_COLOR)
 
                 if now < happy_fish_mode_until:
-                    set_status_flag(status_root, status_label, HAPPY_FISH_COLOR)
+                    set_status_flag(status_root, status_label, current_happy_fish_flag_color(now))
 
                 if thumbs_up_gesture:
                     happy_fish_last_seen_time = now
@@ -1177,9 +1464,9 @@ def main() -> None:
                         happy_fish_mode_until = now + HAPPY_FISH_STATUS_SECONDS
                         HAPPY_FISH_STATUS_UNTIL = happy_fish_mode_until
                         happy_fish_sent_for_hold = True
-                        set_status_flag(status_root, status_label, HAPPY_FISH_COLOR)
+                        set_status_flag(status_root, status_label, current_happy_fish_flag_color(now))
                     elif now < happy_fish_mode_until:
-                        set_status_flag(status_root, status_label, HAPPY_FISH_COLOR)
+                        set_status_flag(status_root, status_label, current_happy_fish_flag_color(now))
                     else:
                         set_status_flag(status_root, status_label, HAND_FOUND_COLOR)
                     pinch_was_active = False
@@ -1372,6 +1659,31 @@ def main() -> None:
                     if DEBUG_MESSAGES and now - last_debug_time >= DEBUG_INTERVAL_SECONDS:
                         print("\nno hand detected")
                         last_debug_time = now
+
+                if easter_egg_hold_start_time is not None:
+                    easter_egg_gap_time = (
+                        999.0
+                        if easter_egg_last_seen_time is None
+                        else now - easter_egg_last_seen_time
+                    )
+
+                    if easter_egg_gap_time <= EASTER_EGG_GESTURE_GRACE_SECONDS:
+                        easter_egg_hold_time = now - easter_egg_hold_start_time
+                        if DEBUG_MESSAGES and now - last_debug_time >= DEBUG_INTERVAL_SECONDS:
+                            print(
+                                "\nno hand detected, but Easter Egg grace is active: "
+                                f"gap={easter_egg_gap_time:.2f}s, "
+                                f"hold={easter_egg_hold_time:.2f}s"
+                            )
+                            last_debug_time = now
+                    else:
+                        debug_print(
+                            "Easter Egg gesture cancelled: no hand detected "
+                            f"for {easter_egg_gap_time:.2f}s"
+                        )
+                        easter_egg_hold_start_time = None
+                        easter_egg_last_seen_time = None
+                        easter_egg_sent_for_hold = False
 
                 if happy_fish_hold_start_time is not None:
                     happy_fish_gap_time = (
