@@ -102,7 +102,7 @@ TARGET_WINDOW_NAME = "asciiquarium-window"
 # DEBUG_MESSAGES prints status/gesture diagnostics to the terminal.
 # DEBUG_CAPTURE_FRAMES saves camera frames for gesture debugging.
 # Leave DEBUG_CAPTURE_FRAMES off during normal use to avoid filling storage.
-DEBUG_MESSAGES = True
+DEBUG_MESSAGES = False
 DEBUG_CAPTURE_FRAMES = False
 DEBUG_INTERVAL_SECONDS = 0.5
 
