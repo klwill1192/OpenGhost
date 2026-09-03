@@ -76,7 +76,7 @@ PI_SHUTDOWN_THUMB_WRIST_RATIO = 1.20
 # Hold a thumbs-up gesture briefly to send H to the aquarium.
 HAPPY_FISH_HOLD_SECONDS = 2.0
 HAPPY_FISH_GESTURE_GRACE_SECONDS = 0.50
-HAPPY_FISH_STATUS_SECONDS = 8.0
+HAPPY_FISH_STATUS_SECONDS = 10.0
 HAPPY_FISH_THUMB_EXTENDED_RATIO = 0.85
 HAPPY_FISH_MIN_THUMB_WRIST_RATIO = 1.15
 HAPPY_FISH_MAX_EXTENDED_FINGERS = 2
@@ -102,7 +102,7 @@ TARGET_WINDOW_NAME = "asciiquarium-window"
 # DEBUG_MESSAGES prints status/gesture diagnostics to the terminal.
 # DEBUG_CAPTURE_FRAMES saves camera frames for gesture debugging.
 # Leave DEBUG_CAPTURE_FRAMES off during normal use to avoid filling storage.
-DEBUG_MESSAGES = False
+DEBUG_MESSAGES = True
 DEBUG_CAPTURE_FRAMES = False
 DEBUG_INTERVAL_SECONDS = 0.5
 
