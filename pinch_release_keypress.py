@@ -220,13 +220,20 @@ def save_debug_frame(rgb_frame, event_name: str, details: str = "", hand_landmar
 
 def find_target_windows() -> list[str]:
     """Return xdotool window IDs matching the target xterm window name."""
-    result = subprocess.run(
-        ["xdotool", "search", "--name", TARGET_WINDOW_NAME],
-        check=False,
-        capture_output=True,
-        text=True,
-        timeout=2,
-    )
+    try:
+        result = subprocess.run(
+            ["xdotool", "search", "--name", TARGET_WINDOW_NAME],
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+    except subprocess.TimeoutExpired:
+        print(
+            f"WARNING: xdotool search timed out while looking for "
+            f"'{TARGET_WINDOW_NAME}'"
+        )
+        return []
 
     window_ids = [line.strip() for line in result.stdout.splitlines() if line.strip()]
 
