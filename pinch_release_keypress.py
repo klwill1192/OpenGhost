@@ -55,7 +55,7 @@ SHUTDOWN_MIN_V_SPREAD = 0.10
 # - 8 seconds: quit the aquarium, then shut down the Raspberry Pi
 PI_SHUTDOWN_YELLOW_SECONDS = 2.0
 PI_SHUTDOWN_RED_SECONDS = 4.0
-PI_SHUTDOWN_TRIGGER_SECONDS = 7.0
+PI_SHUTDOWN_TRIGGER_SECONDS = 8.0
 PI_SHUTDOWN_MAX_EXTENDED_FINGERS = 1
 # Reject thumbs-up so that gesture remains available for a future action.
 # A thumb is considered extended when the thumb tip is far from the index
@@ -606,11 +606,13 @@ def evaluate_pi_shutdown_gesture(hand_landmarks, gesture_details):
     )
     thumb_extended = thumb_extended_by_index or thumb_too_far_from_index
 
-    # Treat a real closed fist as no clearly extended non-thumb fingers.
-    # Earlier versions allowed one extended finger, which made the Easter Egg
-    # gesture look too much like a shutdown hold in some camera frames.
+    # Allow one non-thumb finger to be misread as extended so a real closed fist
+    # is not cancelled by a single noisy MediaPipe frame. Keep the middle-finger
+    # conflict check so the Easter Egg gesture cannot be mistaken for shutdown.
     middle_conflict = ratios["middle"] >= EASTER_EGG_EXTENDED_RATIO
-    few_non_thumb_fingers_extended = extended_count == 0
+    few_non_thumb_fingers_extended = (
+        extended_count <= PI_SHUTDOWN_MAX_EXTENDED_FINGERS
+    )
     thumb_ok = (not PI_SHUTDOWN_REJECT_THUMB_EXTENDED) or (not thumb_extended)
     closed_fist = few_non_thumb_fingers_extended and thumb_ok and not middle_conflict
 
