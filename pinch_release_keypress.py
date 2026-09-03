@@ -79,6 +79,7 @@ HAPPY_FISH_GESTURE_GRACE_SECONDS = 0.50
 HAPPY_FISH_STATUS_SECONDS = 10.0
 HAPPY_FISH_THUMB_EXTENDED_RATIO = 0.85
 HAPPY_FISH_MIN_THUMB_WRIST_RATIO = 1.15
+HAPPY_FISH_MIN_THUMB_INDEX_DISTANCE = 0.15
 HAPPY_FISH_MAX_EXTENDED_FINGERS = 2
 
 # Easter Egg gesture tuning.
@@ -613,15 +614,23 @@ def evaluate_pi_shutdown_gesture(hand_landmarks, gesture_details):
     )
     thumb_extended = thumb_extended_by_index or thumb_too_far_from_index
 
-    # Allow one non-thumb finger to be misread as extended so a real closed fist
-    # is not cancelled by a single noisy MediaPipe frame. Keep the middle-finger
-    # conflict check so the Easter Egg gesture cannot be mistaken for shutdown.
+    # Treat index and middle as the reliable closed-fist indicators while
+    # tolerating noisy ring/pinky extension readings from MediaPipe. Keep the
+    # middle-finger conflict check so the Easter Egg gesture cannot be mistaken
+    # for shutdown.
     middle_conflict = ratios["middle"] >= EASTER_EGG_EXTENDED_RATIO
-    few_non_thumb_fingers_extended = (
-        extended_count <= PI_SHUTDOWN_MAX_EXTENDED_FINGERS
-    )
     thumb_ok = (not PI_SHUTDOWN_REJECT_THUMB_EXTENDED) or (not thumb_extended)
-    closed_fist = few_non_thumb_fingers_extended and thumb_ok and not middle_conflict
+
+    index_folded = ratios["index"] < SHUTDOWN_EXTENDED_FINGER_RATIO
+    middle_folded = ratios["middle"] < EASTER_EGG_EXTENDED_RATIO
+
+    few_non_thumb_fingers_extended = index_folded and middle_folded
+
+    closed_fist = (
+        few_non_thumb_fingers_extended
+        and thumb_ok
+        and not middle_conflict
+    )
 
     details = {
         "ratios": ratios,
@@ -686,8 +695,11 @@ def evaluate_thumbs_up_gesture(hand_landmarks, gesture_details):
     else:
         thumb_wrist_ratio = wrist_to_thumb_tip / wrist_to_thumb_mcp
     thumb_extended = (
-        thumb_extension_ratio >= HAPPY_FISH_THUMB_EXTENDED_RATIO
-        or thumb_wrist_ratio >= HAPPY_FISH_MIN_THUMB_WRIST_RATIO
+        (
+            thumb_extension_ratio >= HAPPY_FISH_THUMB_EXTENDED_RATIO
+            or thumb_wrist_ratio >= HAPPY_FISH_MIN_THUMB_WRIST_RATIO
+        )
+        and thumb_index_distance >= HAPPY_FISH_MIN_THUMB_INDEX_DISTANCE
     )
     few_non_thumb_fingers_extended = (
         extended_count <= HAPPY_FISH_MAX_EXTENDED_FINGERS
